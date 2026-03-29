@@ -4,6 +4,7 @@ import os, requests as req, zipfile, io, json, struct, threading
 from vosk import Model, KaldiRecognizer
 import queue
 import time
+import numpy as np
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", engineio_logger=False, 
@@ -16,7 +17,10 @@ model = None
 sessions = {}
 session_lock = threading.Lock()
 
-CONFIDENCE_THRESHOLD = 0.5
+# Configurações de filtro
+MIN_WORD_LENGTH = 2
+SILENCE_THRESHOLD = 0.005
+NOISE_GATES = ['ah', 'eh', 'uhm', 'hum', 'hmm', 'uh', 'mm', 'er', 'um', 'ã', 'é']
 
 class AudioSession:
     def __init__(self, sid, model):
@@ -25,25 +29,79 @@ class AudioSession:
         self.queue = queue.Queue(maxsize=100)
         self.running = True
         self.last_final = ""
+        self.silence_frames = 0
         self.worker = threading.Thread(target=self._process, daemon=True)
         self.worker.start()
     
+    def estimate_noise_level(self, pcm_data):
+        """Estima nível de ruído do áudio"""
+        audio = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32) / 32768.0
+        energy = np.sqrt(np.mean(audio ** 2))
+        return energy
+    
+    def is_silence(self, energy):
+        """Detecta se é silêncio"""
+        return energy < SILENCE_THRESHOLD
+    
+    def filter_words(self, words):
+        """Filtra palavras de baixa qualidade"""
+        filtered = []
+        for word in words:
+            word = word.lower().strip()
+            
+            if not word:
+                continue
+            if len(word) < MIN_WORD_LENGTH:
+                continue
+            if word in NOISE_GATES:
+                continue
+            if word.isdigit() and len(word) == 1:
+                continue
+            if all(c in 'aeiouáéíóú' for c in word) and len(word) < 3:
+                continue
+            
+            filtered.append(word)
+        
+        return filtered
+    
     def _process(self):
+        consecutive_silence = 0
+        
         while self.running:
             try:
                 data = self.queue.get(timeout=1)
                 if data is None:
                     break
                 
+                energy = self.estimate_noise_level(data)
+                
+                if self.is_silence(energy):
+                    consecutive_silence += 1
+                else:
+                    consecutive_silence = 0
+                
+                if consecutive_silence > 5:
+                    self.rec.Reset()
+                    consecutive_silence = 0
+                    continue
+                
                 if self.rec.AcceptWaveform(data):
                     try:
                         result = json.loads(self.rec.Result())
                         words = result.get('result', [])
-                        if words:
-                            text = ' '.join(words)
+                        filtered_words = self.filter_words(words)
+                        
+                        if filtered_words and len(filtered_words) >= 2:
+                            text = ' '.join(filtered_words)
                             self.last_final = text
-                            print(f"[FINAL] {text}")
-                            socketio.emit('final', {'text': text, 'words': words}, room=self.sid)
+                            print(f"[FINAL] {text} | Energy: {energy:.4f}")
+                            socketio.emit('final', {
+                                'text': text,
+                                'words': filtered_words,
+                                'confidence': float(energy)
+                            }, room=self.sid)
+                        else:
+                            print(f"[DESCARTADO] Poucos palavras válidas: {words} | Energy: {energy:.4f}")
                     except Exception as e:
                         print(f"[ERRO FINAL] {e}")
                 else:
@@ -52,12 +110,15 @@ class AudioSession:
                         if partial.get('partial'):
                             partial_text = partial['partial']
                             words = partial_text.split()
-                            filtered_words = [w for w in words if w.strip()]
-                            if filtered_words:
-                                print(f"[PARCIAL] {' '.join(filtered_words)}")
+                            filtered_words = self.filter_words(words)
+                            
+                            if filtered_words and energy > SILENCE_THRESHOLD:
+                                text = ' '.join(filtered_words)
+                                print(f"[PARCIAL] {text} | Energy: {energy:.4f}")
                                 socketio.emit('partial', {
-                                    'text': ' '.join(filtered_words),
-                                    'words': filtered_words
+                                    'text': text,
+                                    'words': filtered_words,
+                                    'confidence': float(energy)
                                 }, room=self.sid)
                     except Exception as e:
                         print(f"[ERRO PARCIAL] {e}")
