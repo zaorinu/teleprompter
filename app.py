@@ -45,18 +45,47 @@ class Tracker:
         self.pos = 0
 
     def advance(self, rec_words):
-        max_jump = 0
+        best_score = 0
+        best_jump = 0
 
-        for r in rec_words:
-            # procura até 10 palavras à frente
-            for i in range(self.pos, min(self.pos + 10, len(self.words))):
-                if similar(r, self.words[i]):
-                    jump = i - self.pos + 1
-                    max_jump = max(max_jump, jump)
+        max_lookahead = 12
+        window = 6
 
-        if max_jump > 0:
-            self.pos += max_jump
+        for i in range(self.pos, min(self.pos + max_lookahead, len(self.words))):
+            score = 0
+            mistakes = 0
 
+            for j in range(min(window, len(rec_words))):
+                if i + j >= len(self.words):
+                    break
+
+                if similar(rec_words[j], self.words[i + j]):
+                    score += 1
+                else:
+                    mistakes += 1
+
+                # permite até 2 erros na sequência
+                if mistakes > 2:
+                    break
+
+            # 🔥 score ponderado (não exige perfeição)
+            effective = score - (mistakes * 0.5)
+
+            if effective > best_score and score >= 1:
+                best_score = effective
+                best_jump = i - self.pos + max(score, 1)
+
+        # avanço normal
+        if best_jump > 0:
+            self.pos += best_jump
+            return
+
+        # 🧠 FALLBACK: tenta avançar 1 se palavra atual bater
+        if self.pos < len(self.words):
+            for r in rec_words:
+                if similar(r, self.words[self.pos]):
+                    self.pos += 1
+                    return
 # =========================
 # SESSION
 # =========================
