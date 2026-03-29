@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vosk</title>
+</head>
+<body>
+    <h1>Reconhecimento de Fala</h1>
+    <button id="start">Falar</button>
+    <button id="stop" disabled>Parar</button>
+    
+    <div id="partial"></div>
+    <div id="final"></div>
+    <div id="history"></div>
+    <div id="status">Pronto</div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io({ reconnection: true, reconnectionAttempts: Infinity });
+        
+        const startBtn = document.getElementById('start');
+        const stopBtn = document.getElementById('stop');
+        const partialEl = document.getElementById('partial');
+        const finalEl = document.getElementById('final');
+        const historyEl = document.getElementById('history');
+        const statusEl = document.getElementById('status');
+
+        let audioContext, recorder, source, stream, isRecording = false;
+        let history = [];
+
+        function to16BitPCM(float32) {
+            const len = float32.length;
+            const out = new Int16Array(len);
+            for (let i = 0; i < len; i++) {
+                const s = Math.max(-1, Math.min(1, float32[i]));
+                out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return out;
+        }
+
+        socket.on('connect', () => {
+            statusEl.textContent = 'Conectado';
+            startBtn.disabled = false;
+        });
+
+        socket.on('partial', (data) => {
+            if (isRecording) {
+                partialEl.textContent = data.text;
+            }
+        });
+
+        socket.on('final', (data) => {
+            if (isRecording) {
+                finalEl.textContent = data.text;
+                partialEl.textContent = '';
+                history.push(data.text);
+                historyEl.innerHTML = history.map(h => `<p>${h}</p>`).join('');
+            }
+        });
+
+        socket.on('disconnect', () => {
+            statusEl.textContent = 'Desconectado';
+            isRecording = false;
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+        });
+
+        startBtn.addEventListener('click', async () => {
+            if (isRecording || !socket.connected) return;
+            
+            isRecording = true;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            partialEl.textContent = '';
+            finalEl.textContent = '';
+            statusEl.textContent = 'Gravando...';
+
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                source = audioContext.createMediaStreamSource(stream);
+                recorder = audioContext.createScriptProcessor(4096, 1, 1);
+
+                recorder.onaudioprocess = (e) => {
+                    if (!isRecording) return;
+                    const pcm = to16BitPCM(e.inputBuffer.getChannelData(0));
+                    socket.emit('audio', Array.from(pcm));
+                };
+
+                source.connect(recorder);
+                recorder.connect(audioContext.destination);
+            } catch (err) {
+                console.error(err);
+                isRecording = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                statusEl.textContent = 'Erro ao acessar microfone';
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (!isRecording) return;
+            
+            isRecording = false;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            
+            if (recorder) recorder.disconnect();
+            if (source) source.disconnect();
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            if (audioContext) audioContext.close();
+            
+            statusEl.textContent = 'Parado';
+        });
+    </script>
+</body>
+</html>
+<body>
+    <h1>Reconhecimento de Fala</h1>
+    <button id="start">Falar</button>
+    <button id="stop" disabled>Parar</button>
+    
+    <div id="partial"></div>
+    <div id="final"></div>
+    <div id="history"></div>
+    <div id="status">Pronto</div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io({ reconnection: true, reconnectionAttempts: Infinity });
+        
+        const startBtn = document.getElementById('start');
+        const stopBtn = document.getElementById('stop');
+        const partialEl = document.getElementById('partial');
+        const finalEl = document.getElementById('final');
+        const historyEl = document.getElementById('history');
+        const statusEl = document.getElementById('status');
+
+        let audioContext, recorder, source, stream, isRecording = false;
+        let history = [];
+
+        function to16BitPCM(float32) {
+            const len = float32.length;
+            const out = new Int16Array(len);
+            for (let i = 0; i < len; i++) {
+                const s = Math.max(-1, Math.min(1, float32[i]));
+                out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return out;
+        }
+
+        socket.on('connect', () => {
+            statusEl.textContent = 'Conectado';
+            startBtn.disabled = false;
+        });
+
+        socket.on('partial', (data) => {
+            if (isRecording) {
+                partialEl.textContent = data.text;
+            }
+        });
+
+        socket.on('final', (data) => {
+            if (isRecording) {
+                finalEl.textContent = data.text;
+                partialEl.textContent = '';
+                history.push(data.text);
+                historyEl.innerHTML = history.map(h => `<p>${h}</p>`).join('');
+            }
+        });
+
+        socket.on('disconnect', () => {
+            statusEl.textContent = 'Desconectado';
+            isRecording = false;
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+        });
+
+        startBtn.addEventListener('click', async () => {
+            if (isRecording || !socket.connected) return;
+            
+            isRecording = true;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            partialEl.textContent = '';
+            finalEl.textContent = '';
+            statusEl.textContent = 'Gravando...';
+
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                source = audioContext.createMediaStreamSource(stream);
+                recorder = audioContext.createScriptProcessor(4096, 1, 1);
+
+                recorder.onaudioprocess = (e) => {
+                    if (!isRecording) return;
+                    const pcm = to16BitPCM(e.inputBuffer.getChannelData(0));
+                    socket.emit('audio', Array.from(pcm));
+                };
+
+                source.connect(recorder);
+                recorder.connect(audioContext.destination);
+            } catch (err) {
+                console.error(err);
+                isRecording = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                statusEl.textContent = 'Erro ao acessar microfone';
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (!isRecording) return;
+            
+            isRecording = false;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            
+            if (recorder) recorder.disconnect();
+            if (source) source.disconnect();
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            if (audioContext) audioContext.close();
+            
+            statusEl.textContent = 'Parado';
+        });
+    </script>
+</body>
+</html>
